@@ -9,6 +9,7 @@
 - 表格实时刷新，展示 GPU 利用率、显存占用与温度
 - 自定义刷新间隔、SSH 参数、远程命令及密钥文件
 - 一次性模式，方便调试或脚本集成
+- 启动时自动探测不可连接主机，单独列出并跳过后续刷新
 
 ## 快速开始
 
@@ -51,12 +52,12 @@ python3 gpu_watch.py \
 pip install rich
 python3 gpu_watch.py --ui rich --interval 2
 
-pip install textual
+pip install rich textual
 python3 gpu_watch.py --ui textual --interval 2
 ```
 
 - `rich` 模式：彩色进度条与温度信息，自动刷新；
-- `textual` 模式：可滚动的像 nvitop 一样的 TUI，支持 ↑/↓ 滚动、`r` 刷新、`q` 退出。
+- `textual` 模式：可滚动的卡片式 TUI（依赖 rich+textual），支持 ↑/↓ 滚动、`r` 刷新、`q` 退出。
 
 ## 使用 uvx 运行
 
@@ -69,8 +70,8 @@ uvx --from . gpu-watch --interval 3 --ui plain
 # 若需 Rich UI，可顺便拉取依赖
 uvx --from . --with rich gpu-watch --ui rich --interval 2
 
-# Textual UI
-uvx --from . --with textual gpu-watch --ui textual
+# Textual UI（需 rich + textual）
+uvx --from . --with rich --with textual gpu-watch --ui textual
 ```
 
 `uvx --from .` 会使用当前目录作为包来源；通过 `--with rich/textual` 可以在隔离环境中临时安装对应可选依赖。其余 CLI 参数与直接调用 `python3 gpu_watch.py` 完全一致。

@@ -25,6 +25,7 @@ from typing import Any, Dict, List, Optional, Sequence
 
 box = None
 Console = None
+Group = None
 Live = None
 Panel = None
 ProgressBar = None
@@ -42,12 +43,12 @@ TEXTUAL_AVAILABLE = False
 
 def ensure_rich() -> bool:
     """动态加载 rich 相关模块，用于可选 TUI。"""
-    global box, Console, Live, Panel, ProgressBar, Table, Text, RICH_AVAILABLE  # pylint: disable=global-statement
+    global box, Console, Group, Live, Panel, ProgressBar, Table, Text, RICH_AVAILABLE  # pylint: disable=global-statement
     if RICH_AVAILABLE:
         return True
     try:
         from rich import box as rich_box  # type: ignore
-        from rich.console import Console as RichConsole  # type: ignore
+        from rich.console import Console as RichConsole, Group as RichGroup  # type: ignore
         from rich.live import Live as RichLive  # type: ignore
         from rich.panel import Panel as RichPanel  # type: ignore
         from rich.progress_bar import ProgressBar as RichProgressBar  # type: ignore
@@ -58,6 +59,7 @@ def ensure_rich() -> bool:
 
     box = rich_box
     Console = RichConsole
+    Group = RichGroup
     Live = RichLive
     Panel = RichPanel
     ProgressBar = RichProgressBar
@@ -110,6 +112,7 @@ class HostResult:
     host: str
     gpus: List[GPUStat]
     error: Optional[str] = None
+    connection_error: bool = False
 
 
 def parse_args() -> argparse.Namespace:
@@ -296,7 +299,7 @@ async def fetch_host_gpu(
     host: str, remote_command: str, ssh_args: Sequence[str], timeout: float
 ) -> HostResult:
     if not shutil.which("ssh"):
-        return HostResult(host, [], error="本地未找到 ssh 命令")
+        return HostResult(host, [], error="本地未找到 ssh 命令", connection_error=True)
 
     cmd = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", *ssh_args, host, remote_command]
 
@@ -306,16 +309,17 @@ async def fetch_host_gpu(
         )
         stdout_bytes, stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=timeout)
     except asyncio.TimeoutError:
-        return HostResult(host, [], error=f"超时（>{timeout:.0f}s）")
+        return HostResult(host, [], error=f"超时（>{timeout:.0f}s）", connection_error=True)
     except FileNotFoundError:
-        return HostResult(host, [], error="未找到 ssh 可执行文件")
+        return HostResult(host, [], error="未找到 ssh 可执行文件", connection_error=True)
     except Exception as exc:  # pylint: disable=broad-except
-        return HostResult(host, [], error=f"执行失败: {exc}")
+        return HostResult(host, [], error=f"执行失败: {exc}", connection_error=True)
 
     if proc.returncode != 0:
         stderr = stderr_bytes.decode("utf-8", errors="ignore").strip()
         stderr = stderr or f"ssh 返回码 {proc.returncode}"
-        return HostResult(host, [], error=stderr)
+        conn_err = _is_connection_error(stderr)
+        return HostResult(host, [], error=stderr, connection_error=conn_err)
 
     stdout = stdout_bytes.decode("utf-8", errors="ignore").strip()
     gpus = parse_nvidia_smi_output(stdout)
@@ -344,6 +348,23 @@ def parse_nvidia_smi_output(raw: str) -> List[GPUStat]:
             )
         )
     return stats
+
+
+def _is_connection_error(message: str) -> bool:
+    lowered = message.lower()
+    keywords = [
+        "permission denied",
+        "connection timed out",
+        "connection refused",
+        "no route to host",
+        "could not resolve",
+        "connection reset",
+        "kex_exchange_identification",
+        "operation timed out",
+        "ssh:",
+        "unknown host",
+    ]
+    return any(keyword in lowered for keyword in keywords)
 
 
 def format_table(results: Sequence[HostResult]) -> str:
@@ -465,6 +486,20 @@ def build_rich_table(results: Sequence[HostResult]) -> Table:
     return table
 
 
+def build_unreachable_table(unreachable: Dict[str, str]) -> Table:
+    table = Table("Host", "原因", box=box.SIMPLE_HEAVY, expand=True)
+    for host, reason in unreachable.items():
+        table.add_row(host, reason)
+    return table
+
+
+def format_unreachable_text(unreachable: Dict[str, str]) -> str:
+    if not unreachable:
+        return "所有主机可达"
+    lines = [f"{host}: {reason}" for host, reason in unreachable.items()]
+    return "不可连接主机（已跳过）:\n" + "\n".join(lines)
+
+
 def build_host_panel(result: HostResult) -> Panel:
     if not RICH_AVAILABLE and not ensure_rich():
         raise RuntimeError("Rich 组件未加载，无法构建卡片")
@@ -506,6 +541,8 @@ async def monitor_loop_rich(
     hosts: List[str],
     ssh_args: List[str],
     concurrency: int,
+    initial_results: Optional[List[HostResult]] = None,
+    unreachable: Optional[Dict[str, str]] = None,
 ) -> None:
     console = Console()
     title = f"GPU Watch · 本地 {platform.node()}"
@@ -515,24 +552,44 @@ async def monitor_loop_rich(
         border_style="cyan",
     )
 
+    pending_results = list(initial_results) if initial_results else None
+
     try:
         with Live(placeholder, console=console, refresh_per_second=4) as live:
             while True:
                 start = time.time()
-                results = await gather_gpu_stats(
-                    hosts,
-                    args.remote_command,
-                    ssh_args,
-                    concurrency,
-                    args.timeout,
-                )
+                if pending_results is not None:
+                    results = pending_results
+                    pending_results = None
+                else:
+                    results = await gather_gpu_stats(
+                        hosts,
+                        args.remote_command,
+                        ssh_args,
+                        concurrency,
+                        args.timeout,
+                    )
                 timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
                 subtitle = Text(
-                    f"{timestamp}  • 监控 {len(hosts)} 台  • 并发 {concurrency}",
+                    f"{timestamp}  • 监控 {len(hosts)} 台  • 并发 {concurrency}"
+                    + (f" • 不可达 {len(unreachable)}" if unreachable else ""),
                     style="dim",
                 )
+                main_table = build_rich_table(results)
+                body = main_table
+                if unreachable:
+                    offline_table = build_unreachable_table(unreachable)
+                    body = Group(
+                        main_table,
+                        Panel(
+                            offline_table,
+                            title="不可连接主机",
+                            border_style="red",
+                            padding=(0, 1),
+                        ),
+                    )
                 panel = Panel(
-                    build_rich_table(results),
+                    body,
                     title=title,
                     subtitle=subtitle,
                     border_style="cyan",
@@ -553,6 +610,8 @@ async def monitor_loop_textual(
     hosts: List[str],
     ssh_args: List[str],
     concurrency: int,
+    initial_results: Optional[List[HostResult]],
+    unreachable: Dict[str, str],
 ) -> None:
     if not ensure_textual():
         print("textual 库未安装，无法启用滚动 UI。请运行 pip install textual", file=sys.stderr)
@@ -577,6 +636,10 @@ async def monitor_loop_textual(
         #summary {
             padding: 0 1;
         }
+        #offline {
+            padding: 0 1;
+            color: $warning;
+        }
         #cards {
             height: 1fr;
             padding: 0 1;
@@ -591,22 +654,35 @@ async def monitor_loop_textual(
             ("r", "refresh", "刷新"),
         ]
 
-        def __init__(self) -> None:
+        def __init__(
+            self,
+            initial_snapshot: Optional[List[HostResult]],
+            offline_hosts: Dict[str, str],
+        ) -> None:
             super().__init__()
             self._auto_task: Optional[asyncio.Task] = None
             self._summary: Optional[Any] = None
+            self._offline: Optional[Any] = None
             self._cards_container: Optional[Any] = None
+            self._pending_snapshot: Optional[List[HostResult]] = (
+                list(initial_snapshot) if initial_snapshot else None
+            )
+            self._offline_hosts = offline_hosts
 
         def compose(self) -> "ComposeResultType":  # type: ignore[override]
             yield TextualHeader(show_clock=True)
             yield TextualStatic("初始化中...", id="summary")
+            yield TextualStatic("", id="offline")
             container = TextualScroll(id="cards")
             yield container
             yield TextualFooter()
 
         async def on_mount(self) -> None:
             self._summary = self.query_one("#summary", TextualStatic)
+            self._offline = self.query_one("#offline", TextualStatic)
             self._cards_container = self.query_one("#cards", TextualScroll)
+            if self._offline:
+                self._offline.update(format_unreachable_text(self._offline_hosts))
             await self.refresh_data()
             if args.interval_once:
                 self.call_later(self.exit)
@@ -631,13 +707,17 @@ async def monitor_loop_textual(
             timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
             if self._summary:
                 self._summary.update(f"[bold]刷新中…[/] {timestamp}")
-            results = await gather_gpu_stats(
-                hosts,
-                args.remote_command,
-                ssh_args,
-                concurrency,
-                args.timeout,
-            )
+            if self._pending_snapshot is not None:
+                results = self._pending_snapshot
+                self._pending_snapshot = None
+            else:
+                results = await gather_gpu_stats(
+                    hosts,
+                    args.remote_command,
+                    ssh_args,
+                    concurrency,
+                    args.timeout,
+                )
             if self._cards_container:
                 existing_children = list(self._cards_container.children)
                 for child in existing_children:
@@ -654,7 +734,7 @@ async def monitor_loop_textual(
                     f"{timestamp} · 监控 {len(hosts)} 台 · 并发 {concurrency}"
                 )
 
-    app = GPUWatchApp()
+    app = GPUWatchApp(initial_results, unreachable)
     await app.run_async()
 
 
@@ -663,17 +743,24 @@ async def monitor_loop_plain(
     hosts: List[str],
     ssh_args: List[str],
     concurrency: int,
+    initial_results: Optional[List[HostResult]] = None,
+    unreachable: Optional[Dict[str, str]] = None,
 ) -> None:
+    pending_results = list(initial_results) if initial_results else None
     try:
         while True:
             start = time.time()
-            results = await gather_gpu_stats(
-                hosts,
-                args.remote_command,
-                ssh_args,
-                concurrency,
-                args.timeout,
-            )
+            if pending_results is not None:
+                results = pending_results
+                pending_results = None
+            else:
+                results = await gather_gpu_stats(
+                    hosts,
+                    args.remote_command,
+                    ssh_args,
+                    concurrency,
+                    args.timeout,
+                )
             timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
             hostname = platform.node()
             if not args.no_clear:
@@ -682,6 +769,10 @@ async def monitor_loop_plain(
                 print("\n" + "=" * 60)
             print(f"[{timestamp}] 本地: {hostname}  监控主机数: {len(hosts)}")
             print(format_table(results))
+            if unreachable:
+                print("\n不可连接主机（已跳过）：")
+                for host, reason in unreachable.items():
+                    print(f" - {host}: {reason}")
             if args.interval_once:
                 break
             elapsed = time.time() - start
@@ -710,15 +801,43 @@ async def monitor_loop(args: argparse.Namespace) -> None:
     concurrency = args.concurrency or min(len(hosts), 8)
     ssh_args = build_ssh_args(args)
 
+    initial_results_all = await gather_gpu_stats(
+        hosts,
+        args.remote_command,
+        ssh_args,
+        concurrency,
+        args.timeout,
+    )
+    unreachable: Dict[str, str] = {}
+    reachable_results: List[HostResult] = []
+    for res in initial_results_all:
+        if res.connection_error:
+            unreachable[res.host] = res.error or "连接失败"
+        else:
+            reachable_results.append(res)
+
+    hosts = [res.host for res in reachable_results]
+    if not hosts:
+        print("所有主机均不可连接：", file=sys.stderr)
+        for host, reason in unreachable.items():
+            print(f" - {host}: {reason}", file=sys.stderr)
+        sys.exit(1)
+
     if args.ui == "rich":
         if not ensure_rich():
             print("rich 库未安装，无法启用 rich UI。请运行 pip install rich", file=sys.stderr)
             sys.exit(1)
-        await monitor_loop_rich(args, hosts, ssh_args, concurrency)
+        await monitor_loop_rich(
+            args, hosts, ssh_args, concurrency, reachable_results, unreachable
+        )
     elif args.ui == "textual":
-        await monitor_loop_textual(args, hosts, ssh_args, concurrency)
+        await monitor_loop_textual(
+            args, hosts, ssh_args, concurrency, reachable_results, unreachable
+        )
     else:
-        await monitor_loop_plain(args, hosts, ssh_args, concurrency)
+        await monitor_loop_plain(
+            args, hosts, ssh_args, concurrency, reachable_results, unreachable
+        )
 
 
 def main() -> None:
