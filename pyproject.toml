@@ -3,20 +3,41 @@ requires = ["setuptools>=65", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "gpu-watch"
-version = "0.1.0"
-description = "Monitor GPUs on all hosts defined in ~/.ssh/config."
+name = "remo-gpu"
+version = "0.1.2"
+description = "Monitor GPUs on every SSH host defined in ~/.ssh/config."
 readme = "README.md"
+license = { file = "LICENSE" }
 requires-python = ">=3.9"
-dependencies = []
+dependencies = [
+    "rich>=13,<14",
+    "textual>=0.60,<0.70"
+]
 authors = [
-    { name = "Leon" }
+    { name = "bobby" }
+]
+keywords = ["gpu", "ssh", "monitoring", "nvidia-smi"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Environment :: Console",
+    "Topic :: System :: Monitoring",
 ]
 
-[project.optional-dependencies]
-rich = ["rich>=13,<14"]
-textual = ["textual>=0.60,<0.70"]
-
 [project.scripts]
-gpu-watch = "gpu_watch:main"
+remo-gpu = "remo_gpu.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/boyuaner/remo-gpu"
+Repository = "https://github.com/boyuaner/remo-gpu"
+
+[tool.setuptools.packages.find]
+where = ["src"]
 

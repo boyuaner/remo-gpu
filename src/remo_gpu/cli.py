@@ -1,8 +1,7 @@
-#!/usr/bin/env python3
 """
-gpu_watch.py
--------------
-一个用于汇总 .ssh/config 中所有可用主机 GPU 使用情况的命令行工具。
+remo_gpu.cli
+------------
+命令行入口：从 .ssh/config 汇总远程主机 GPU 使用情况。
 """
 
 from __future__ import annotations
@@ -91,6 +90,7 @@ def ensure_textual() -> bool:
     TEXTUAL_AVAILABLE = True
     return True
 
+
 REMOTE_GPU_CMD = (
     "nvidia-smi --query-gpu=index,name,temperature.gpu,utilization.gpu,"
     "memory.used,memory.total --format=csv,noheader,nounits"
@@ -170,8 +170,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--ui",
         choices=["plain", "rich", "textual"],
-        default="plain",
-        help="输出模式：plain 纯文本，rich 彩色进度条，textual 可滚动 TUI",
+        default="textual",
+        help="输出模式：plain 纯文本，rich 彩色进度条，textual 可滚动 TUI（默认）",
     )
     parser.add_argument(
         "--no-clear",
@@ -545,7 +545,7 @@ async def monitor_loop_rich(
     unreachable: Optional[Dict[str, str]] = None,
 ) -> None:
     console = Console()
-    title = f"GPU Watch · 本地 {platform.node()}"
+    title = f"Remo-GPU · 本地 {platform.node()}"
     placeholder = Panel(
         Text("正在拉取 GPU 数据...", style="dim"),
         title=title,
@@ -852,5 +852,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
 

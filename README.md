@@ -1,32 +1,47 @@
-# GPU Watch CLI
+# Remo-GPU
 
-一个基于 Python 的命令行工具，用于批量监控 `~/.ssh/config` 中所有主机的 GPU 使用情况。脚本会对每台主机执行一次 `nvidia-smi`（或自定义命令），并以表格形式实时刷新结果。
+Remo-GPU 是一个面向多主机的 GPU 监控工具：自动解析 `~/.ssh/config`，通过 SSH 并发执行 `nvidia-smi`（或自定义命令），并以 Textual 卡片、Rich 表格、纯文本等方式展示指标。
 
-## 特性
+---
 
-- 自动解析 `~/.ssh/config` 及其 `Include` 指令，获取可用主机别名
-- 并发执行 SSH 命令，默认最多 8 台同时查询
-- 表格实时刷新，展示 GPU 利用率、显存占用与温度
-- 自定义刷新间隔、SSH 参数、远程命令及密钥文件
-- 一次性模式，方便调试或脚本集成
-- 启动时自动探测不可连接主机，单独列出并跳过后续刷新
-
-## 快速开始
-
-1. 确保本地 Python ≥ 3.9 且可运行 `ssh`
-2. 主机上必须安装 `nvidia-smi`（NVIDIA 驱动自带），并已配置免密登录
-3. 运行脚本：
+## 🚀 Quick Start
 
 ```bash
-python3 gpu_watch.py
+# 临时运行（自动隔离环境）
+uvx remo-gpu
+
+# 或安装后使用
+pip install remo-gpu
+remo-gpu --interval 3
 ```
 
-默认每 5 秒刷新一次，可按 `Ctrl + C` 退出。
+> 默认 UI 为 Textual；**确保本地 `ssh` 可用、远程主机安装 `nvidia-smi`**
 
-## 常用参数
+---
+
+## ✨ Features
+
+- 解析 `~/.ssh/config` 及其 `Include` 指令，自动收集 Host 别名
+- 并发 SSH 查询（默认最多 8 台），实时展示 GPU 利用率/显存/温度
+- Textual 卡片式界面（默认）支持滚动、刷新 (`r`)、退出 (`q`)
+- Rich 彩色表格与纯文本模式可任选
+- 启动时探测不可连接主机，单独列出并跳过后续刷新
+- 自定义刷新间隔、SSH 参数、远程命令 (`--remote-command`)
+
+---
+
+## 🧭 Requirements
+
+1. Python ≥ 3.9
+2. 本机 `ssh` 可用，远程机器可免密登录
+3. 远程安装 `nvidia-smi`（或自定义命令）
+
+---
+
+## ⚙️ Common Options
 
 ```bash
-python3 gpu_watch.py \
+python -m remo_gpu \
   --interval 3 \
   --timeout 8 \
   --hosts gpu-a gpu-b \
@@ -35,53 +50,32 @@ python3 gpu_watch.py \
   --ssh-option "-o UserKnownHostsFile=/dev/null"
 ```
 
-- `--hosts`: 仅监控指定 Host 别名
-- `--interval`: 刷新间隔（秒），默认 5
-- `--timeout`: 单次 SSH 命令超时（秒），默认 10
-- `--identity-file`: 指定私钥文件，等价于 `ssh -i`
-- `--ssh-option`: 其他 SSH 原始参数，可多次传入
-- `--remote-command`: 自定义远程查询命令，默认执行 `nvidia-smi`
-- `--interval-once`: 只运行一次后退出
-- `--no-clear`: 禁用清屏，便于查看更长的输出历史
+- `--ui {textual,rich,plain}`：切换 UI；默认 textual
+- `--interval` / `--timeout`：刷新间隔 / SSH 超时
+- `--interval-once`：只输出一次
+- `--no-clear`：纯文本模式禁用清屏
+- `--remote-command`：替换 `nvidia-smi`
 
-### Rich / Textual UI（可选）
+---
 
-如需更接近 nvitop 的可视化体验，可根据需要安装 `rich` 或 `textual`：
+## 🖥 UI Modes
 
 ```bash
-pip install rich
-python3 gpu_watch.py --ui rich --interval 2
+# Textual（默认，可滚动卡片）
+remo-gpu --interval 2
 
-pip install rich textual
-python3 gpu_watch.py --ui textual --interval 2
+# Plain 纯文本
+remo-gpu --ui plain --interval 2 --no-clear
 ```
 
-- `rich` 模式：彩色进度条与温度信息，自动刷新；
-- `textual` 模式：可滚动的卡片式 TUI（依赖 rich+textual），支持 ↑/↓ 滚动、`r` 刷新、`q` 退出。
+---
 
-## 使用 uvx 运行
+## 🔧 Bash Version
 
-借助 [uv](https://github.com/astral-sh/uv) 的 `uvx` 子命令，可以在隔离环境中运行脚本而不手动创建虚拟环境：
-
-```bash
-# 在项目根目录
-uvx --from . gpu-watch --interval 3 --ui plain
-
-# 若需 Rich UI，可顺便拉取依赖
-uvx --from . --with rich gpu-watch --ui rich --interval 2
-
-# Textual UI（需 rich + textual）
-uvx --from . --with rich --with textual gpu-watch --ui textual
-```
-
-`uvx --from .` 会使用当前目录作为包来源；通过 `--with rich/textual` 可以在隔离环境中临时安装对应可选依赖。其余 CLI 参数与直接调用 `python3 gpu_watch.py` 完全一致。
-
-## Bash 版本
-
-如果希望以纯 bash 方式运行，可直接执行 `gpu_watch.sh`：
+若只需最小依赖，可直接运行 `remo_gpu.sh`：
 
 ```bash
-bash gpu_watch.sh \
+bash remo_gpu.sh \
   --interval 3 \
   --hosts gpu-a,gpu-b \
   --ssh-option StrictHostKeyChecking=no \
@@ -90,15 +84,18 @@ bash gpu_watch.sh \
 
 - `--ssh-option` 会被转换为 `ssh -o key=value`
 - `--once` 仅输出一次结果
-- 兼容 macOS 自带 bash 3.2；若已安装 bash 4+，同样可直接运行
+- 兼容 macOS 自带 bash 3.2（如需关联数组请安装新版 bash）
 
-## 提示
 
-- 如 `.ssh/config` 使用了通配符（`Host *`），脚本会自动忽略
-- 若首次连接提示主机指纹，可通过 `--ssh-option "-o StrictHostKeyChecking=no"` 关闭严格校验（按需使用）
-- 对监控频率要求更高时，适当调小 `--interval` 并增大 `--concurrency`
+## 💡 Tips
 
-## 贡献
+- `.ssh/config` 中的 `Host *` 会被忽略，请为实际机器使用具体别名
+- 首次连接提示指纹时，可临时加 `--ssh-option "-o StrictHostKeyChecking=no"`
+- 调高刷新频率（更小 `--interval`）或增大 `--concurrency` 时注意远程负载
 
-欢迎根据自身环境扩展输出格式、Prometheus 上报、或结合 `watch`/`tmux` 等工具打造个性化监控面板。*** End Patch
+---
+
+## 🤝 Contributing
+
+欢迎提交 PR/Issue：可以扩展输出格式、增加 Prometheus 上报、或结合 `watch` / `tmux` / `nvitop` 等工具打造自定义面板。如果该项目对你有帮助，欢迎 Star ⭐️ 支持。
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
-# gpu_watch.sh
-# -------------
+# remo_gpu.sh
+# -----------
 # 使用 bash 解析 ~/.ssh/config 中的主机并周期性查询各主机 GPU 状态。
 
 set -o pipefail
@@ -25,7 +25,7 @@ SSH_ARGS=()
 
 usage() {
   cat <<'EOF'
-用法: gpu_watch.sh [选项]
+用法: remo_gpu.sh [选项]
 
 选项:
   -c, --config PATH          指定 SSH 配置文件 (默认 ~/.ssh/config)

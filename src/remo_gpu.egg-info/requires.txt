@@ -1,6 +1,2 @@
-
-[rich]
 rich<14,>=13
-
-[textual]
 textual<0.70,>=0.60
