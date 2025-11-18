@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=65", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gpu-watch"
+version = "0.1.0"
+description = "Monitor GPUs on all hosts defined in ~/.ssh/config."
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = []
+authors = [
+    { name = "Leon" }
+]
+
+[project.optional-dependencies]
+rich = ["rich>=13,<14"]
+textual = ["textual>=0.60,<0.70"]
+
+[project.scripts]
+gpu-watch = "gpu_watch:main"
+
